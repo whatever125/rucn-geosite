@@ -54,6 +54,15 @@
 
 ## 📋 Категории
 
+### 🇨🇳 Китай
+
+<table width="100%">
+<thead><tr><th align="left">Категория</th><th align="left">Описание</th><th align="left">Назначение</th></tr></thead>
+<tbody>
+<tr><td><code>category-cn</code></td><td>Китайские домены и сервисы (~111k)</td><td>Для маршрутизации китайского трафика в direct</td></tr>
+</tbody>
+</table>
+
 ### 🇷🇺 Россия
 
 <table width="100%">
