@@ -1,6 +1,11 @@
 name: Build geosite
 on:
   workflow_dispatch:
+  schedule:
+    # Daily refresh so category-cn tracks felixonmars/dnsmasq-china-list
+    # instead of going stale (this fork previously had no recurring
+    # trigger at all -- see "Refresh China domain list" step below).
+    - cron: '17 4 * * *'
   push:
     branches:
       - test
@@ -25,6 +30,23 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
+
+      - name: Refresh China domain list from felixonmars/dnsmasq-china-list
+        if: github.ref_name == 'master'
+        run: |
+          set -euo pipefail
+          ${{ env.CURL }} -o /tmp/china.conf \
+            "https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/accelerated-domains.china.conf"
+          grep -oP '(?<=^server=/)[^/]+' /tmp/china.conf | sed 's/^/domain:/' | sort -u > data/category-cn
+          if ! git diff --quiet -- data/category-cn; then
+            git config --local user.name "github-actions"
+            git config --local user.email "github-actions@users.noreply.github.com"
+            git add data/category-cn
+            git commit -m "Refresh category-cn from felixonmars/dnsmasq-china-list ($(date -u +%Y-%m-%d))"
+            git push origin HEAD:master
+          else
+            echo "category-cn unchanged, nothing to commit"
+          fi
 
       - name: Checkout geosite builder
         uses: actions/checkout@v6
