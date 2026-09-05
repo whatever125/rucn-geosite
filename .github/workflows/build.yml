@@ -2,9 +2,10 @@ name: Build geosite
 on:
   workflow_dispatch:
   schedule:
-    # Daily refresh so category-cn tracks felixonmars/dnsmasq-china-list
-    # instead of going stale (this fork previously had no recurring
-    # trigger at all -- see "Refresh China domain list" step below).
+    # Daily rebuild so category-cn (an include: of v2fly's own "cn" list)
+    # and category-ru stay current with upstream, and geosite.dat's
+    # @release ref keeps a fresh CDN-purged copy available at all times
+    # (this fork previously had no recurring trigger at all).
     - cron: '17 4 * * *'
   push:
     branches:
@@ -31,23 +32,6 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Refresh China domain list from felixonmars/dnsmasq-china-list
-        if: github.ref_name == 'master'
-        run: |
-          set -euo pipefail
-          ${{ env.CURL }} -o /tmp/china.conf \
-            "https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/accelerated-domains.china.conf"
-          grep -oP '(?<=^server=/)[^/]+' /tmp/china.conf | sed 's/^/domain:/' | sort -u > data/category-cn
-          if ! git diff --quiet -- data/category-cn; then
-            git config --local user.name "github-actions"
-            git config --local user.email "github-actions@users.noreply.github.com"
-            git add data/category-cn
-            git commit -m "Refresh category-cn from felixonmars/dnsmasq-china-list ($(date -u +%Y-%m-%d))"
-            git push origin HEAD:master
-          else
-            echo "category-cn unchanged, nothing to commit"
-          fi
-
       - name: Checkout geosite builder
         uses: actions/checkout@v6
         with:
@@ -61,6 +45,45 @@ jobs:
           go-version-file: community/go.mod
           cache: true
           cache-dependency-path: community/go.sum
+
+      - name: Extract v2fly's "cn" category closure
+        # data/category-cn is `include:cn`, referencing v2fly's own curated
+        # geosite:cn category (banks, media, dev tools, ~158 sub-lists,
+        # ~8.7k domain rules) instead of a raw dnsmasq-china-list dump
+        # (~111k domains). The build step below replaces community/data
+        # wholesale with our own ./data, so v2fly's "cn" and everything it
+        # transitively includes need to be pulled out first -- copying
+        # v2fly's entire ~1500-file data directory instead would defeat the
+        # minimalism this repo (and its build) is otherwise built around.
+        run: |
+          set -euo pipefail
+          python3 - <<'PYEOF'
+          import os, shutil
+
+          src = "community/data"
+          seen = set()
+
+          def resolve(name):
+              if name in seen:
+                  return
+              seen.add(name)
+              path = os.path.join(src, name)
+              if not os.path.exists(path):
+                  raise SystemExit(f"missing referenced file: {name}")
+              with open(path, encoding="utf-8", errors="replace") as f:
+                  for line in f:
+                      line = line.strip()
+                      if not line or line.startswith("#"):
+                          continue
+                      if line.startswith("include:"):
+                          resolve(line.split("include:")[1].split()[0].strip())
+
+          resolve("cn")
+          os.makedirs("/tmp/cn-closure", exist_ok=True)
+          for name in seen:
+              shutil.copy(os.path.join(src, name), os.path.join("/tmp/cn-closure", name))
+          print(f"extracted {len(seen)} files for category-cn's include:cn closure")
+          PYEOF
 
       - name: Set tag
         if: github.ref_name == 'master'
@@ -88,6 +111,7 @@ jobs:
           rm -rf community/data /tmp/out
           mkdir -p community/data /tmp/out
 
+          cp -a /tmp/cn-closure/. community/data/
           cp -a ./data/. community/data/
 
           pushd community >/dev/null
