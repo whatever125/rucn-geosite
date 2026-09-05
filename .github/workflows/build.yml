@@ -207,6 +207,16 @@ jobs:
               }
             ' "$f" > "$tmp"
 
+            if [ ! -s "$tmp" ]; then
+              # e.g. category-cn is `include:cn` with no literal domains --
+              # this awk pass (unlike the Go geosite.dat builder) doesn't
+              # resolve include:, so there's nothing to convert. mihomo
+              # panics on an empty ruleset, so skip it instead of crashing.
+              echo "skip $f: no literal domains after include:/comment stripping"
+              rm -f "$tmp"
+              continue
+            fi
+
             rel="${f#$work/}"
             rel_noext="${rel%.*}"
             dest="$out/${rel_noext}.mrs"
@@ -264,6 +274,15 @@ jobs:
               | .rules[0] |= with_entries(select(.value | length > 0))
               | if (.rules[0] | length) == 0 then .rules = [] else . end
             ' > "$tmp_json"
+
+            if [ "$(jq '.rules | length' "$tmp_json")" -eq 0 ]; then
+              # e.g. category-cn is `include:cn` with no literal domains --
+              # this awk pass doesn't resolve include: (same as the mihomo
+              # step above), so there's nothing to compile.
+              echo "skip $f: no literal domains after include:/comment stripping"
+              rm -f "$tmp_json"
+              continue
+            fi
 
             rel="${f#$src/}"
             rel_noext="${rel%.*}"
